@@ -2,6 +2,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver import ActionChains
 import time
+import easyocr
 
 
 class StoreInfoSpider:
@@ -51,7 +52,13 @@ class StoreInfoSpider:
         # 退出
         driver.quit()
 
+    def pic_ocr(self):
+        reader = easyocr.Reader(['ch_sim', 'en'])
+        result = reader.readtext('tmp.png')
+        print(result)
+
 
 if __name__ == "__main__":
     spider = StoreInfoSpider("https://www.aliexpress.com/store/1101380133")
-    spider.spy()
+    # spider.spy()
+    spider.pic_ocr()
