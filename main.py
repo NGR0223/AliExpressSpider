@@ -42,23 +42,23 @@ class StoreInfoSpider:
         slide_ele = driver.find_element(By.ID, 'nc_1_n1z')
         ActionChains(driver).click_and_hold(slide_ele).perform()
         ActionChains(driver).move_by_offset(xoffset=258, yoffset=0).perform()
-        time.sleep(0.1)
+        time.sleep(0.1)  # 模拟鼠标停留
         ActionChains(driver).release(slide_ele).perform()
-        time.sleep(1)
+        time.sleep(5)   # 等待页面刷新
 
         # 截图
-        driver.save_screenshot('tmp.png')
+        driver.save_screenshot('tmp1.png')
 
         # 退出
         driver.quit()
 
     def pic_ocr(self):
         reader = easyocr.Reader(['ch_sim', 'en'])
-        result = reader.readtext('tmp.png')
+        result = reader.readtext('tmp1.png')
         print(result)
 
 
 if __name__ == "__main__":
-    spider = StoreInfoSpider("https://www.aliexpress.com/store/1101380133")
-    # spider.spy()
+    spider = StoreInfoSpider("https://www.aliexpress.com/store/1101287070")
+    spider.spy()
     spider.pic_ocr()
