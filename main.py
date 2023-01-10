@@ -1,5 +1,5 @@
 from selenium import webdriver
-from selenium.common import NoSuchFrameException, NoSuchElementException
+from selenium.common import NoSuchFrameException, NoSuchElementException, ElementNotInteractableException
 from selenium.webdriver.common.by import By
 from selenium.webdriver import ActionChains, EdgeOptions
 from selenium.webdriver.support import expected_conditions as EC
@@ -7,10 +7,13 @@ from selenium.webdriver.support.wait import WebDriverWait
 import time
 import easyocr
 import logging
+from pybloom_live import ScalableBloomFilter
+import os
 
 ALIEXPRESS_URL = 'https://aliexpress.com'
 ALIEXPRESS_UNAME = 'ngr0223@gmail.com'
 ALIEXPRESS_PWD = 'mWs!Cr26i3.PirB'
+PREFIX_LICENSE_LINK = 'https://sellerjoin.aliexpress.com/credential/showcredential.htm?storeNum='
 
 logger = logging.getLogger('root')
 logger.setLevel(level=logging.DEBUG)
@@ -23,14 +26,17 @@ logger.addHandler(console_handler)
 
 class AliExpressSpider:
     def __init__(self, browser: str):
+        self.m_logger = logging.getLogger('AliExpressSpider')
+        self.m_logger.info("Init")
+
+        self.m_bf = None
+        self.bloom_filter_init()
+
         self.m_spider = None
+        self.list_cates_info = []
+        self.num_current_page = 1
         if browser == 'Edge':
             self.browser_nit(browser)
-            self.list_cates_info = []
-            self.num_current_page = 1
-
-            self.m_logger = logging.getLogger('AliExpressSpider')
-            self.m_logger.info("Init")
         else:
             exit(-1)
 
@@ -47,6 +53,12 @@ class AliExpressSpider:
         # 关闭网站通知
         option.add_argument('--disable-notifications')
         self.m_spider = webdriver.Edge(options=option)
+
+    def bloom_filter_init(self):
+        self.m_bf = ScalableBloomFilter()
+        self.m_bf.tofile(open('BloomFilter'))
+        if os.path.exists('BloomFilter'):
+            self.m_bf.fromfile(open('BloomFilter'))
 
     def try_to_get_page(self, page_url):
         try:
@@ -80,7 +92,7 @@ class AliExpressSpider:
         if self.try_to_get_page(ALIEXPRESS_URL):
             while True:
                 try:
-                    self.m_spider.find_element(By.ID, 'fm-login-id')
+                    self.m_spider.find_element(By.CSS_SELECTOR, "input[id^='fm-login']")
                     self.login()
                 except NoSuchElementException:
                     break
@@ -88,7 +100,7 @@ class AliExpressSpider:
             # 关闭优惠通知
             # x = position-0 + length-400 - border-23
             # y = position-0 + border-23
-            close_ele = WebDriverWait(self.m_spider, 10).until(
+            close_ele = WebDriverWait(self.m_spider, 20).until(
                 EC.visibility_of_element_located((By.CSS_SELECTOR, "img[style='position: absolute; width: 36px; height:"
                                                                    " 36px; right: 5px; top: 5px; cursor: pointer;']")))
             ActionChains(self.m_spider).move_to_element(close_ele).click().perform()
@@ -118,6 +130,33 @@ class AliExpressSpider:
             self.m_logger.info(cards_store.get_attribute('href'))
         return tmp_list_store_url
 
+    def get_store_info_pic(self, store_num):
+        license_page_url = PREFIX_LICENSE_LINK + store_num
+        if self.try_to_get_page(license_page_url):
+            while True:
+                load_flag = 0
+                # 滑动验证
+                try:
+                    slide_ele = self.m_spider.find_element(By.ID, 'nc_1_n1z')
+                    ActionChains(self.m_spider).click_and_hold(slide_ele).move_by_offset(xoffset=258,
+                                                                                         yoffset=0).perform()
+                except (NoSuchElementException, ElementNotInteractableException):
+                    load_flag += 1
+                # 点击错误提示刷新页面
+                try:
+                    refresh_ele = self.m_spider.find_element(By.ID, 'nc_1_refresh1')
+                    ActionChains(self.m_spider).move_to_element(refresh_ele).click().perform()
+                except NoSuchElementException:
+                    load_flag += 1
+                if load_flag == 2:
+                    break
+                time.sleep(5)  # 等待页面刷新
+
+            # 截图
+            self.m_spider.save_screenshot(f'StoreInfoPic/{store_num}.png')
+        else:
+            return False
+
     def start_to_spy(self):
         # 获取所有分类
         self.m_logger.info("Start to get all cates")
@@ -138,9 +177,11 @@ class AliExpressSpider:
                         tmp_list_store_url = self.get_store_url_of_page()
 
                         for store_url in tmp_list_store_url:
-                            tmp_spider = StoreInfoSpider(store_url)
-                            tmp_spider.get_store_info_pic()
-                            tmp_spider.pic_ocr()
+                            start_index_store_num = store_url.rindex('/')
+                            store_num = store_url[start_index_store_num + 1:]
+                            if not self.m_bf.add(store_num):
+                                self.get_store_info_pic(store_num)
+                        self.m_bf.tofile(open('BloomFilter'))
                         # 向后翻页
                         try:
                             next_page_ele = self.m_spider.find_element(By.CSS_SELECTOR, "link[rel='next']")
@@ -158,60 +199,8 @@ class AliExpressSpider:
         self.m_spider.quit()
 
 
-class StoreInfoSpider:
-    m_store_name = ''
-
-    def __init__(self, store_url: str):
-        self.m_store_url = store_url
-
-    def get_store_info_pic(self):
-        # 打开商店主页
-        driver = webdriver.Edge()
-        driver.get(self.m_store_url)
-        driver.maximize_window()
-
-        # 找到商店名称元素，并将光标移动到其上方
-        # xpath = //*[@id="hd"]/div/div/div[1]/div[2]/div[1]/div/div/div[1]/div[1]/a
-        store_name_ele = driver.find_element(By.XPATH,
-                                             '//*[@id="hd"]/div/div/div[1]/div[2]/div[1]/div/div/div[1]/div[1]/a')
-        self.m_store_name = store_name_ele.accessible_name
-        ActionChains(driver).move_to_element(store_name_ele).perform()
-
-        # 找到Business License元素并点击
-        # xpath = /html/body/div[11]/div/div/div[1]/div[1]/a
-        try:
-            licence_link_ele = driver.find_element(By.XPATH, '/html/body/div[10]/div/div/div[1]/div[1]/a')
-        except:
-            print("Cannot not find license link")
-            return
-        licence_link_ele.click()
-        time.sleep(5)
-
-        # 将句柄切换到新开启的页面
-        pages = driver.window_handles
-        driver.switch_to.window(pages[1])
-
-        # 找到滑块元素，并按住向右滑动258个像素
-        slide_ele = driver.find_element(By.ID, 'nc_1_n1z')
-        ActionChains(driver).click_and_hold(slide_ele).perform()
-        ActionChains(driver).move_by_offset(xoffset=258, yoffset=0).perform()
-        time.sleep(0.1)  # 模拟鼠标停留
-        ActionChains(driver).release(slide_ele).perform()
-        time.sleep(5)  # 等待页面刷新
-
-        # 截图
-        driver.save_screenshot(f'StoreInfoPic/{self.m_store_name}.png')
-
-        # 退出
-        driver.quit()
-
-    def pic_ocr(self):
-        reader = easyocr.Reader(['ch_sim', 'en'])
-        result = reader.readtext(f'StoreInfoPic/{self.m_store_name}.png')
-        print(result)
-
-
 if __name__ == "__main__":
     testAliExpressSpider = AliExpressSpider('Edge')
+
     testAliExpressSpider.start_to_spy()
     testAliExpressSpider.destroy()
