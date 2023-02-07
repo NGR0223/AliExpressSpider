@@ -4,12 +4,11 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver import ActionChains, EdgeOptions
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
-import time
-import easyocr
-import logging
 from pybloom_live import ScalableBloomFilter
-import os
+import os, csv, time, logging
 
+CATES_CSV_FILE = 'cates.csv'
+GOTTEN_STORE_BLOOM = 'GottenStore.blm'
 ALIEXPRESS_URL = 'https://aliexpress.com'
 ALIEXPRESS_UNAME = 'ngr0223@gmail.com'
 ALIEXPRESS_PWD = 'mWs!Cr26i3.PirB'
@@ -55,10 +54,10 @@ class AliExpressSpider:
         self.m_spider = webdriver.Edge(options=option)
 
     def bloom_filter_init(self):
-        self.m_bf = ScalableBloomFilter()
-        self.m_bf.tofile(open('BloomFilter'))
-        if os.path.exists('BloomFilter'):
-            self.m_bf.fromfile(open('BloomFilter'))
+        if os.path.exists(GOTTEN_STORE_BLOOM):
+            self.m_bf = ScalableBloomFilter().fromfile(open(GOTTEN_STORE_BLOOM, 'rb'))
+        else:
+            self.m_bf = ScalableBloomFilter()
 
     def try_to_get_page(self, page_url):
         try:
@@ -89,50 +88,70 @@ class AliExpressSpider:
         ActionChains(self.m_spider).click_and_hold(slide_ele).move_by_offset(316, 0).perform()
 
     def get_all_cates(self):
-        if self.try_to_get_page(ALIEXPRESS_URL):
-            while True:
-                try:
-                    self.m_spider.find_element(By.CSS_SELECTOR, "input[id^='fm-login']")
-                    self.login()
-                except NoSuchElementException:
-                    break
-
-            # 关闭优惠通知
-            # x = position-0 + length-400 - border-23
-            # y = position-0 + border-23
-            close_ele = WebDriverWait(self.m_spider, 20).until(
-                EC.visibility_of_element_located((By.CSS_SELECTOR, "img[style='position: absolute; width: 36px; height:"
-                                                                   " 36px; right: 5px; top: 5px; cursor: pointer;']")))
-            ActionChains(self.m_spider).move_to_element(close_ele).click().perform()
-
-            # 找到所有一级菜单，将光标移至上方以加载二级菜单
-            list_first_menu_ele = self.m_spider.find_elements(By.CSS_SELECTOR, "dl[data-role='first-menu']")
-            for first_menu_ele in list_first_menu_ele:
-                ActionChains(self.m_spider).move_to_element(first_menu_ele).perform()
-                time.sleep(1)
-            # 获取二级菜单名称和链接，并保存
-            list_two_menu_ele = self.m_spider.find_elements(By.CSS_SELECTOR, "dl[data-role='two-menu'] > dd > a")
-            for two_menu_ele in list_two_menu_ele:
-                dict_tmp_cate_info = {'name': two_menu_ele.get_attribute('innerText'),
-                                      'link': two_menu_ele.get_attribute('href')}
-                self.list_cates_info.append(dict_tmp_cate_info)
+        if os.path.isfile(CATES_CSV_FILE):
+            with open(CATES_CSV_FILE, encoding='utf-8') as cates_csv_f:
+                iter_csv_file = csv.reader(cates_csv_f)
+                header = next(iter_csv_file)
+                for row in iter_csv_file:
+                    dict_tmp_cate_info = {'name': row[0], 'link': row[1]}
+                    self.list_cates_info.append(dict_tmp_cate_info)
+        if len(self.list_cates_info) != 0:
             return True
         else:
-            return False
+            if self.try_to_get_page(ALIEXPRESS_URL):
+                while True:
+                    try:
+                        self.m_spider.find_element(By.CSS_SELECTOR, "input[id^='fm-login']")
+                        self.login()
+                    except NoSuchElementException:
+                        break
+
+                # 关闭优惠通知
+                # x = position-0 + length-400 - border-23
+                # y = position-0 + border-23
+                close_ele = WebDriverWait(self.m_spider, 20).until(
+                    EC.visibility_of_element_located(
+                        (By.CSS_SELECTOR, "img[style='position: absolute; width: 36px; height:"
+                                          " 36px; right: 5px; top: 5px; cursor: pointer;']")))
+                ActionChains(self.m_spider).move_to_element(close_ele).click().perform()
+
+                # 找到所有一级菜单，将光标移至上方以加载二级菜单
+                list_first_menu_ele = self.m_spider.find_elements(By.CSS_SELECTOR, "dl[data-role='first-menu']")
+                for first_menu_ele in list_first_menu_ele:
+                    ActionChains(self.m_spider).move_to_element(first_menu_ele).perform()
+                    time.sleep(1)
+                # 获取二级菜单名称和链接，并保存
+                list_two_menu_ele = self.m_spider.find_elements(By.CSS_SELECTOR,
+                                                                "dl[data-role='two-menu'] > dd > a")
+                with open(CATES_CSV_FILE, 'a+', newline='') as cates_csv_f:
+                    csv_writer = csv.writer(cates_csv_f)
+                    for two_menu_ele in list_two_menu_ele:
+                        dict_tmp_cate_info = {'name': two_menu_ele.get_attribute('innerText'),
+                                              'link': two_menu_ele.get_attribute('href')}
+                        self.list_cates_info.append(dict_tmp_cate_info)
+
+                        # 写入到CSV保存，避免下次再次读取
+                        csv_writer.writerow([dict_tmp_cate_info['name'], dict_tmp_cate_info['link'], 0])
+                return True
+            else:
+                return False
 
     def get_store_url_of_page(self):
         self.scroll_to_end_of_page()
         list_cards_store_ele = self.m_spider.find_elements(By.CSS_SELECTOR, "a[role='store']")
         self.m_logger.info(f'The current page has {len(list_cards_store_ele)} in total')
         tmp_list_store_url = []
+        link_count = 1
         for cards_store in list_cards_store_ele:
             tmp_list_store_url.append(cards_store.get_attribute('href'))
-            self.m_logger.info(cards_store.get_attribute('href'))
+            self.m_logger.info(f"Link {link_count} : {cards_store.get_attribute('href')}")
+            link_count += 1
         return tmp_list_store_url
 
     def get_store_info_pic(self, store_num):
         license_page_url = PREFIX_LICENSE_LINK + store_num
         if self.try_to_get_page(license_page_url):
+            retry = 0
             while True:
                 load_flag = 0
                 # 滑动验证
@@ -152,6 +171,10 @@ class AliExpressSpider:
                     break
                 time.sleep(5)  # 等待页面刷新
 
+                # 最多重试十次
+                retry += 1
+                if retry > 10:
+                    break
             # 截图
             self.m_spider.save_screenshot(f'StoreInfoPic/{store_num}.png')
         else:
@@ -162,7 +185,6 @@ class AliExpressSpider:
         self.m_logger.info("Start to get all cates")
         if self.get_all_cates():
             self.m_logger.info("Successfully get all categories and their links")
-
             # 遍历所有分类
             for cate_info in self.list_cates_info:
                 self.num_current_page = 1
@@ -173,7 +195,7 @@ class AliExpressSpider:
                     # 循环获取所有页的商店信息
                     while True:
                         # 获取当前页信息
-                        self.m_logger.info(f'Start to get store info of Page{self.num_current_page}')
+                        self.m_logger.info(f'Start to get store info of Page {self.num_current_page}')
                         tmp_list_store_url = self.get_store_url_of_page()
 
                         for store_url in tmp_list_store_url:
@@ -181,7 +203,7 @@ class AliExpressSpider:
                             store_num = store_url[start_index_store_num + 1:]
                             if not self.m_bf.add(store_num):
                                 self.get_store_info_pic(store_num)
-                        self.m_bf.tofile(open('BloomFilter'))
+                        self.m_bf.tofile(open(GOTTEN_STORE_BLOOM, 'wb'))
                         # 向后翻页
                         try:
                             next_page_ele = self.m_spider.find_element(By.CSS_SELECTOR, "link[rel='next']")
@@ -201,6 +223,5 @@ class AliExpressSpider:
 
 if __name__ == "__main__":
     testAliExpressSpider = AliExpressSpider('Edge')
-
     testAliExpressSpider.start_to_spy()
     testAliExpressSpider.destroy()
