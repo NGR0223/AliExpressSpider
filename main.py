@@ -1,11 +1,17 @@
+import os
+import csv
+import time
+import logging
+from random import randint
 from selenium import webdriver
-from selenium.common import NoSuchElementException, ElementNotInteractableException
+from selenium.common import NoSuchElementException, ElementNotInteractableException, InvalidArgumentException, \
+    WebDriverException
 from selenium.webdriver.common.by import By
 from selenium.webdriver import ActionChains, EdgeOptions
-from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.webdriver import Options
+from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.wait import WebDriverWait
 from pybloom_live import ScalableBloomFilter
-import os, csv, time, logging
 
 CATES_CSV_FILE = 'cates.csv'  # 分类信息文件
 INFO_CSV_FILE = 'info.csv'  # 商家信息文件
@@ -30,6 +36,53 @@ def write_csv(list_info):
         writer.writerow(list_info)
 
 
+def get_track(distance):
+    """
+    拿到移动轨迹，模仿人的滑动行为，先匀加速后匀减速
+    匀变速运动基本公式：
+    ①v=v0+at
+    ②s=v0t+(1/2)at²
+    ③v²-v0²=2as
+    :param distance: 需要移动的距离
+    :return: 存放每0.2秒移动的距离
+    """
+    # 初速度
+    v = 0
+    # 单位时间为0.2s来统计轨迹，轨迹即0.2内的位移
+    t = 0.1
+    # 位移/轨迹列表，列表内的一个元素代表0.2s的位移
+    tracks = []
+    # 当前的位移
+    current = 0
+    # 到达mid值开始减速
+    mid = distance * 7 / 8
+    distance += 10  # 先滑过一点，最后再反着滑动回来
+    # a = random.randint(1,3)
+    while current < distance:
+        if current < mid:
+            # 加速度越小，单位时间的位移越小,模拟的轨迹就越多越详细
+            a = randint(13, 16)  # 加速运动
+        else:
+            a = -randint(13, 16)  # 减速运动
+        # 初速度
+        v0 = v
+        # 0.2秒时间内的位移
+        s = v0 * t + 0.5 * a * (t ** 2)
+        # 当前的位置
+        current += s
+        # 添加到轨迹列表
+        tracks.append(round(s))
+        # 速度已经达到v,该速度作为下次的初速度
+        v = v0 + a * t
+    # 反着滑动到大概准确位置
+    for i in range(2):
+        tracks.append(-randint(2, 3))
+    for i in range(2):
+        tracks.append(-randint(1, 3))
+
+    return tracks
+
+
 class AliExpressSpider:
     def __init__(self, browser: str):
         self.m_logger = logging.getLogger('AliExpressSpider')
@@ -39,26 +92,46 @@ class AliExpressSpider:
         self.bloom_filter_init()
 
         self.m_spider = None
-        self.list_cates_info = []
+        self.cate_infos = []
+        self.links_current_page = []
         self.num_current_page = 1
-        if browser == 'Edge':
-            self.browser_nit(browser)
+        if browser == 'Edge' or browser == 'Chrome':
+            self.browser_init(browser)
         else:
             exit(-1)
 
-    def browser_nit(self, browser: str):
-        option = EdgeOptions()
-        # 屏蔽“受自动化控制”
-        option.add_experimental_option('excludeSwitches', ['enable-automation', 'load-extension'])
+    def browser_init(self, browser: str):
+        if browser == 'Edge':
+            option = EdgeOptions()
+            # 屏蔽“受自动化控制”
+            option.add_experimental_option('excludeSwitches', ['enable-automation', 'load-extension'])
 
-        # 屏蔽“保存密码”
-        prefs = {"credentials_enable_service": False,
-                 "profile.password_manager_enabled": False}
-        option.add_experimental_option("prefs", prefs)
+            # 屏蔽“保存密码”
+            prefs = {"credentials_enable_service": False,
+                     "profile.password_manager_enabled": False}
+            option.add_experimental_option("prefs", prefs)
 
-        # 关闭网站通知
-        option.add_argument('--disable-notifications')
-        self.m_spider = webdriver.Edge(options=option)
+            # 关闭网站通知
+            option.add_argument('--disable-notifications')
+            # 禁用Blink运行时
+            option.add_argument("--disable-blink-features=AutomationControlled")
+            self.m_spider = webdriver.Edge(options=option)
+            # 覆盖window.navigator.webdriver为undefined
+            self.m_spider.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+                "source": """
+                                Object.defineProperty(navigator, 'webdriver', {
+                                  get: () => undefined
+                                })
+                              """
+            })
+        elif browser == 'Chrome':
+            option = Options()
+            # 连接到手动启动的浏览器
+            option.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
+
+            self.m_spider = webdriver.Chrome(options=option)
+        else:
+            exit(-1)
 
     def bloom_filter_init(self):
         if os.path.exists(GOTTEN_STORE_BLOOM):
@@ -71,7 +144,7 @@ class AliExpressSpider:
             self.m_spider.get(page_url)
             self.m_spider.maximize_window()
             return True
-        except:
+        except (InvalidArgumentException, WebDriverException):
             self.m_logger.error(f'Failed to get the page({page_url})')
             return False
 
@@ -84,8 +157,12 @@ class AliExpressSpider:
 
     def slide_verification_by_offset(self, offset):
         slide_ele = self.m_spider.find_element(By.ID, 'nc_1_n1z')
-        ActionChains(self.m_spider).click_and_hold(slide_ele).move_by_offset(xoffset=offset, yoffset=0).perform()
+        tracks = get_track(offset)
+        ActionChains(self.m_spider).click_and_hold(slide_ele).perform()
         time.sleep(0.5)
+        for track in tracks:
+            ActionChains(self.m_spider).move_by_offset(xoffset=track, yoffset=0).perform()
+            time.sleep(0.001)
 
     def login(self):
         # 登录账号
@@ -95,9 +172,12 @@ class AliExpressSpider:
 
         # 滑动验证
         WebDriverWait(self.m_spider, 10).until(
-            EC.frame_to_be_available_and_switch_to_it((By.ID, 'baxia-dialog-content')))
-        slide_ele = WebDriverWait(self.m_spider, 10).until(EC.visibility_of_element_located((By.ID, 'nc_1_n1z')))
-        ActionChains(self.m_spider).click_and_hold(slide_ele).move_by_offset(316, 0).perform()
+            ec.frame_to_be_available_and_switch_to_it((By.ID, 'baxia-dialog-content')))
+        try:
+            WebDriverWait(self.m_spider, 10).until(ec.visibility_of_element_located((By.ID, 'nc_1_n1z')))
+            self.slide_verification_by_offset(316)
+        except NoSuchElementException:
+            pass
 
     def get_all_cates(self):
         if self.try_to_get_page(ALIEXPRESS_URL):
@@ -113,8 +193,9 @@ class AliExpressSpider:
             # y = position-0 + border-23
             # position: absolute; width: 36px; height: 36px; right: 5px; top: 5px; cursor: pointer;
             try:
-                close_ele = WebDriverWait(self.m_spider, 20).until(EC.visibility_of_element_located((By.CSS_SELECTOR,
-                                                                                                     "img[style='position: absolute; width: 36px; height: 36px; right: 5px; top: 5px; cursor: pointer;']")))
+                close_ele = self.m_spider.find_element(By.CSS_SELECTOR,
+                                                       "img[style='position: absolute; width: 36px; height: 36px; "
+                                                       "right: 5px; top: 5px; cursor: pointer;']")
                 ActionChains(self.m_spider).move_to_element(close_ele).click().perform()
             except NoSuchElementException:
                 ...
@@ -123,11 +204,11 @@ class AliExpressSpider:
         if os.path.isfile(CATES_CSV_FILE):
             with open(CATES_CSV_FILE, encoding='utf-8') as cates_csv_f:
                 iter_csv_file = csv.reader(cates_csv_f)
-                header = next(iter_csv_file)
+                next(iter_csv_file)  # 去除表头
                 for row in iter_csv_file:
                     dict_tmp_cate_info = {'name': row[0], 'link': row[1]}
-                    self.list_cates_info.append(dict_tmp_cate_info)
-        if len(self.list_cates_info) != 0:
+                    self.cate_infos.append(dict_tmp_cate_info)
+        if len(self.cate_infos) != 0:
             return True
         else:
             # 找到所有一级菜单，将光标移至上方以加载二级菜单
@@ -143,7 +224,7 @@ class AliExpressSpider:
                 for two_menu_ele in list_two_menu_ele:
                     dict_tmp_cate_info = {'name': two_menu_ele.get_attribute('innerText'),
                                           'link': two_menu_ele.get_attribute('href')}
-                    self.list_cates_info.append(dict_tmp_cate_info)
+                    self.cate_infos.append(dict_tmp_cate_info)
 
                     # 写入到CSV保存，避免下次再次读取
                     csv_writer.writerow([dict_tmp_cate_info['name'], dict_tmp_cate_info['link'], 0])
@@ -161,64 +242,73 @@ class AliExpressSpider:
             link_count += 1
         return tmp_list_store_url
 
-    def get_store_info_pic(self, store_num):
+    def get_store_info(self, store_num):
         license_page_url = PREFIX_LICENSE_LINK + store_num
         if self.try_to_get_page(license_page_url):
             retry = 0
             while True:
-                load_flag = 0
+                ban_flag = False
+                load_count = 0
                 # 滑动验证
                 try:
                     self.m_spider.find_element(By.ID, 'nc_1_n1z')
                     self.slide_verification_by_offset(258)
                 except (NoSuchElementException, ElementNotInteractableException):
-                    load_flag += 1
+                    load_count += 1
                 # 点击错误提示刷新页面
                 try:
                     refresh_ele = self.m_spider.find_element(By.ID, 'nc_1_refresh1')
                     ActionChains(self.m_spider).move_to_element(refresh_ele).click().perform()
                     time.sleep(0.5)
                 except NoSuchElementException:
-                    load_flag += 1
-                if load_flag == 2:
+                    load_count += 1
+                if load_count == 2:
                     break
                 time.sleep(3)  # 等待页面刷新
 
                 # 最多重试十次
                 retry += 1
                 if retry > 10:
-                    self.m_logger.info(f'Failed to get picture of {store_num} after ten retries')
+                    self.m_logger.info(f'Failed to get info of {store_num} after ten retries')
+                    ban_flag = True
                     break
-            # # 截图
-            # self.m_spider.save_screenshot(f'StoreInfoPic/{store_num}.png')
-
+            if ban_flag:
+                return -2
             # 获取所需要的信息
             try:
                 info_name_elems = self.m_spider.find_elements(By.CSS_SELECTOR, "#container div[class='label']")
                 info_content_elems = self.m_spider.find_elements(By.CSS_SELECTOR, "#container div[class='content-en']")
                 list_info = [store_num, '', '', '', '']
+                match_count = 0
                 for i, info_name_elem in enumerate(info_name_elems):
                     if info_name_elem.text == 'Company name：':
                         list_info[1] = info_content_elems[i].text
+                        match_count += 1
                         pass
                     elif info_name_elem.text == 'Address：':
                         list_info[2] = info_content_elems[i].text
+                        match_count += 1
                         pass
                     elif info_name_elem.text == 'Business Scope：':
                         list_info[3] = info_content_elems[i].text
+                        match_count += 1
                         pass
                     elif info_name_elem.text == 'Established：':
                         list_info[4] = info_content_elems[i].text
+                        match_count += 1
                         pass
                     else:
                         ...
-
-                self.m_logger.info(str(list_info))
-                write_csv(list_info)
+                if match_count >= 2:
+                    # self.m_logger.info(str(list_info))
+                    write_csv(list_info)
+                    return 0
+                else:
+                    return -4
             except NoSuchElementException:
-                ...
+                return -3
         else:
-            return False
+            return -1
 
     def start_to_spy(self):
         # 获取所有分类
@@ -226,7 +316,7 @@ class AliExpressSpider:
         if self.get_all_cates():
             self.m_logger.info("Successfully get all categories and their links")
             # 遍历所有分类
-            for cate_info in self.list_cates_info:
+            for cate_info in self.cate_infos:
                 self.num_current_page = 1
                 self.m_logger.info(f'Start to get store link of {cate_info["name"]}')
 
@@ -236,18 +326,37 @@ class AliExpressSpider:
                     while True:
                         # 获取当前页信息
                         self.m_logger.info(f'Start to get store link of Page {self.num_current_page}')
-                        tmp_list_store_url = self.get_store_url_of_page()
+                        self.links_current_page = self.get_store_url_of_page()
 
-                        for store_url in tmp_list_store_url:
-                            start_index_store_num = store_url.rindex('/')
-                            store_num = store_url[start_index_store_num + 1:]
+                        tmp_links_current_page = self.links_current_page[:]
+                        for store_link in tmp_links_current_page:
+                            start_index_store_num = store_link.rindex('/')
+                            store_num = store_link[start_index_store_num + 1:]
                             self.m_logger.info(f'Start to get store info of {store_num}')
-                            if not self.m_bf.add(store_num):
-                                self.get_store_info_pic(store_num)
-                                self.m_logger.info(f'Successfully get store info of {store_num}')
-                            else:
+                            if store_num in self.m_bf:
                                 self.m_logger.info(f'Already get store info of {store_num}')
-                            time.sleep(1)
+                            else:
+                                ret = self.get_store_info(store_num)
+                                if ret == 0:
+                                    self.m_logger.info(f'Successfully get store info of {store_num}')
+                                    self.m_bf.add(store_num)
+                                    self.links_current_page.remove(store_link)
+                                elif ret == -1:
+                                    self.m_logger.info(f'Failed to get info of {store_num} due to Page loading failure')
+                                elif ret == -2:
+                                    self.m_logger.info(f'Failed to get info of {store_num} due to Banned')
+                                    self.m_bf.tofile(open(GOTTEN_STORE_BLOOM, 'wb'))
+                                    self.m_spider.quit()
+                                    self.browser_init('Chrome')
+                                elif ret == -3:
+                                    self.m_logger.info(
+                                        f'Failed to get info of {store_num} due to Web elements loading failure')
+                                elif ret == -4:
+                                    self.m_logger.info(
+                                        f'Failed to get info of {store_num} due to Web elements loaded not enough')
+                                else:
+                                    self.m_logger.info(f'Failed to get info of {store_num} due to Unknown error')
+                            time.sleep(randint(1, 3))
 
                             # 偶尔提示“通过验证以确保正常访问”
                             try:
@@ -275,6 +384,6 @@ class AliExpressSpider:
 
 
 if __name__ == "__main__":
-    testAliExpressSpider = AliExpressSpider('Edge')
+    testAliExpressSpider = AliExpressSpider('Chrome')
     testAliExpressSpider.start_to_spy()
     testAliExpressSpider.destroy()
