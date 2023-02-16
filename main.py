@@ -3,6 +3,7 @@ import csv
 import time
 import logging
 from random import randint
+import subprocess
 from selenium import webdriver
 from selenium.common import NoSuchElementException, ElementNotInteractableException, InvalidArgumentException, \
     WebDriverException
@@ -84,7 +85,11 @@ def get_track(distance):
 
 
 class AliExpressSpider:
-    def __init__(self, browser: str):
+    def __init__(self, browser):
+        self.cate_infos = []
+        self.links_current_page = []
+        self.num_current_page = 1
+
         self.m_logger = logging.getLogger('AliExpressSpider')
         self.m_logger.info("Init")
 
@@ -92,46 +97,19 @@ class AliExpressSpider:
         self.bloom_filter_init()
 
         self.m_spider = None
-        self.cate_infos = []
-        self.links_current_page = []
-        self.num_current_page = 1
-        if browser == 'Edge' or browser == 'Chrome':
-            self.browser_init(browser)
-        else:
-            exit(-1)
+        self.browser_init(browser)
 
-    def browser_init(self, browser: str):
-        if browser == 'Edge':
+    def browser_init(self, browser):
+        if browser:
             option = EdgeOptions()
-            # 屏蔽“受自动化控制”
-            option.add_experimental_option('excludeSwitches', ['enable-automation', 'load-extension'])
-
-            # 屏蔽“保存密码”
-            prefs = {"credentials_enable_service": False,
-                     "profile.password_manager_enabled": False}
-            option.add_experimental_option("prefs", prefs)
-
-            # 关闭网站通知
-            option.add_argument('--disable-notifications')
-            # 禁用Blink运行时
-            option.add_argument("--disable-blink-features=AutomationControlled")
+            # 连接到手动启动的浏览器
+            option.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
             self.m_spider = webdriver.Edge(options=option)
-            # 覆盖window.navigator.webdriver为undefined
-            self.m_spider.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-                "source": """
-                                Object.defineProperty(navigator, 'webdriver', {
-                                  get: () => undefined
-                                })
-                              """
-            })
-        elif browser == 'Chrome':
+        else:
             option = Options()
             # 连接到手动启动的浏览器
             option.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
-
             self.m_spider = webdriver.Chrome(options=option)
-        else:
-            exit(-1)
 
     def bloom_filter_init(self):
         if os.path.exists(GOTTEN_STORE_BLOOM):
@@ -311,6 +289,7 @@ class AliExpressSpider:
             return -1
 
     def start_to_spy(self):
+        flag_restart = False
         # 获取所有分类
         self.m_logger.info("Start to get all cates")
         if self.get_all_cates():
@@ -345,9 +324,8 @@ class AliExpressSpider:
                                     self.m_logger.info(f'Failed to get info of {store_num} due to Page loading failure')
                                 elif ret == -2:
                                     self.m_logger.info(f'Failed to get info of {store_num} due to Banned')
-                                    self.m_bf.tofile(open(GOTTEN_STORE_BLOOM, 'wb'))
-                                    self.m_spider.quit()
-                                    self.browser_init('Chrome')
+                                    flag_restart = True
+                                    break
                                 elif ret == -3:
                                     self.m_logger.info(
                                         f'Failed to get info of {store_num} due to Web elements loading failure')
@@ -366,6 +344,9 @@ class AliExpressSpider:
                                 pass
                         self.m_bf.tofile(open(GOTTEN_STORE_BLOOM, 'wb'))
 
+                        if flag_restart:
+                            break
+
                         # 向后翻页
                         try:
                             next_page_ele = self.m_spider.find_element(By.CSS_SELECTOR, "link[rel='next']")
@@ -376,6 +357,7 @@ class AliExpressSpider:
                             break
                 else:
                     ...
+
         else:
             self.m_logger.info("Exit")
 
@@ -384,6 +366,24 @@ class AliExpressSpider:
 
 
 if __name__ == "__main__":
-    testAliExpressSpider = AliExpressSpider('Chrome')
-    testAliExpressSpider.start_to_spy()
-    testAliExpressSpider.destroy()
+    cmd_edge = '"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe" ' \
+               '--remote-debugging-port=9222 ' \
+               '--disable-notification ' \
+               '--user-data-dir="D:\\PycharmProjects\\AliExpressSpider\\EdgeProfile"'
+
+    cmd_chrome = '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" ' \
+                 '--remote-debugging-port=9222 ' \
+                 '--disable-notifications ' \
+                 '--user-data-dir="D:\\PycharmProjects\\AliExpressSpider\\ChromeProfile"'
+    browser_type = True
+    while True:
+        if browser_type:
+            proc = subprocess.Popen(cmd_edge)
+        else:
+            proc = subprocess.Popen(cmd_chrome)
+        testAliExpressSpider = AliExpressSpider(browser_type)
+        testAliExpressSpider.start_to_spy()
+        testAliExpressSpider.destroy()
+
+        browser_type = not browser_type
+        proc.kill()
