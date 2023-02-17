@@ -10,8 +10,6 @@ from selenium.common import NoSuchElementException, ElementNotInteractableExcept
 from selenium.webdriver.common.by import By
 from selenium.webdriver import ActionChains, EdgeOptions
 from selenium.webdriver.chrome.webdriver import Options
-from selenium.webdriver.support import expected_conditions as ec
-from selenium.webdriver.support.wait import WebDriverWait
 from pybloom_live import ScalableBloomFilter
 
 CATES_CSV_FILE = 'cates.csv'  # 分类信息文件
@@ -31,10 +29,10 @@ console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
 
-def write_csv(list_info):
+def write_csv(infos: list):
     with open(INFO_CSV_FILE, 'a+', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(list_info)
+        writer.writerow(infos)
 
 
 def get_track(distance):
@@ -85,10 +83,11 @@ def get_track(distance):
 
 
 class AliExpressSpider:
-    def __init__(self, browser):
-        self.cate_infos = []
-        self.links_current_page = []
-        self.num_current_page = 1
+    def __init__(self, browser, reverse_order):
+        self.m_cate_infos = []
+        self.m_links_current_page = []
+        self.m_num_current_page = 1
+        self.m_reverse_order = reverse_order
 
         self.m_logger = logging.getLogger('AliExpressSpider')
         self.m_logger.info("Init")
@@ -134,9 +133,9 @@ class AliExpressSpider:
             time.sleep(0.2)
 
     def slide_verification_by_offset(self, offset):
-        slide_ele = self.m_spider.find_element(By.ID, 'nc_1_n1z')
+        slide_elem = self.m_spider.find_element(By.ID, 'nc_1_n1z')
         tracks = get_track(offset)
-        ActionChains(self.m_spider).click_and_hold(slide_ele).perform()
+        ActionChains(self.m_spider).click_and_hold(slide_elem).perform()
         time.sleep(0.2)
         for track in tracks:
             ActionChains(self.m_spider).move_by_offset(xoffset=track, yoffset=0).perform()
@@ -171,10 +170,10 @@ class AliExpressSpider:
             # y = position-0 + border-23
             # position: absolute; width: 36px; height: 36px; right: 5px; top: 5px; cursor: pointer;
             try:
-                close_ele = self.m_spider.find_element(By.CSS_SELECTOR,
-                                                       "img[style='position: absolute; width: 36px; height: 36px; "
-                                                       "right: 5px; top: 5px; cursor: pointer;']")
-                ActionChains(self.m_spider).move_to_element(close_ele).click().perform()
+                close_elem = self.m_spider.find_element(By.CSS_SELECTOR,
+                                                        "img[style='position: absolute; width: 36px; height: 36px; "
+                                                        "right: 5px; top: 5px; cursor: pointer;']")
+                ActionChains(self.m_spider).move_to_element(close_elem).click().perform()
             except NoSuchElementException:
                 pass
         else:
@@ -185,24 +184,23 @@ class AliExpressSpider:
                 next(iter_csv_file)  # 去除表头
                 for row in iter_csv_file:
                     dict_tmp_cate_info = {'name': row[0], 'link': row[1]}
-                    self.cate_infos.append(dict_tmp_cate_info)
-        if len(self.cate_infos) != 0:
+                    self.m_cate_infos.append(dict_tmp_cate_info)
+        if len(self.m_cate_infos) != 0:
             return True
         else:
             # 找到所有一级菜单，将光标移至上方以加载二级菜单
-            list_first_menu_ele = self.m_spider.find_elements(By.CSS_SELECTOR, "dl[data-role='first-menu']")
-            for first_menu_ele in list_first_menu_ele:
-                ActionChains(self.m_spider).move_to_element(first_menu_ele).perform()
+            first_menu_elems = self.m_spider.find_elements(By.CSS_SELECTOR, "dl[data-role='first-menu']")
+            for first_menu_elem in first_menu_elems:
+                ActionChains(self.m_spider).move_to_element(first_menu_elem).perform()
                 time.sleep(1)
             # 获取二级菜单名称和链接，并保存
-            list_two_menu_ele = self.m_spider.find_elements(By.CSS_SELECTOR,
-                                                            "dl[data-role='two-menu'] > dd > a")
+            two_menu_elems = self.m_spider.find_elements(By.CSS_SELECTOR, "dl[data-role='two-menu'] > dd > a")
             with open(CATES_CSV_FILE, 'a+', newline='') as cates_csv_f:
                 csv_writer = csv.writer(cates_csv_f)
-                for two_menu_ele in list_two_menu_ele:
-                    dict_tmp_cate_info = {'name': two_menu_ele.get_attribute('innerText'),
-                                          'link': two_menu_ele.get_attribute('href')}
-                    self.cate_infos.append(dict_tmp_cate_info)
+                for two_menu_elem in two_menu_elems:
+                    dict_tmp_cate_info = {'name': two_menu_elem.get_attribute('innerText'),
+                                          'link': two_menu_elem.get_attribute('href')}
+                    self.m_cate_infos.append(dict_tmp_cate_info)
 
                     # 写入到CSV保存，避免下次再次读取
                     csv_writer.writerow([dict_tmp_cate_info['name'], dict_tmp_cate_info['link'], 0])
@@ -210,37 +208,48 @@ class AliExpressSpider:
 
     def get_store_url_of_page(self):
         self.scroll_to_end_of_page()
-        list_cards_store_ele = self.m_spider.find_elements(By.CSS_SELECTOR, "a[role='store']")
-        self.m_logger.info(f'The current page has {len(list_cards_store_ele)} link in total')
-        tmp_list_store_url = []
+        cards_store_elems = self.m_spider.find_elements(By.CSS_SELECTOR, "a[role='store']")
+        self.m_logger.info(f'The current page has {len(cards_store_elems)} link in total')
+        tmp_store_links = []
         link_count = 1
-        for cards_store in list_cards_store_ele:
-            tmp_list_store_url.append(cards_store.get_attribute('href'))
-            self.m_logger.info(f"Link {link_count} : {cards_store.get_attribute('href')}")
+        for cards_store_elem in cards_store_elems:
+            tmp_store_links.append(cards_store_elem.get_attribute('href'))
+            self.m_logger.info(f"Link {link_count} : {cards_store_elem.get_attribute('href')}")
             link_count += 1
-        return tmp_list_store_url
+        return tmp_store_links
 
     def get_store_info(self, store_num):
         license_page_url = PREFIX_LICENSE_LINK + store_num
         if self.try_to_get_page(license_page_url):
             retry = 0
             while True:
-                load_count = 0
+                # 直到加载出信息页面跳出循环
+                try:
+                    self.m_spider.find_element(By.CSS_SELECTOR, "#container div[class='label']")
+                    break
+                except NoSuchElementException:
+                    ...
+
                 # 滑动验证
                 try:
                     self.m_spider.find_element(By.ID, 'nc_1_n1z')
                     self.slide_verification_by_offset(258)
                 except (NoSuchElementException, ElementNotInteractableException):
-                    load_count += 1
+                    ...
+
                 # 点击错误提示刷新页面
                 try:
-                    refresh_ele = self.m_spider.find_element(By.ID, 'nc_1_refresh1')
-                    ActionChains(self.m_spider).move_to_element(refresh_ele).click().perform()
+                    refresh_elem = self.m_spider.find_element(By.CSS_SELECTOR, '#nc_1_refresh1')
+                    ActionChains(self.m_spider).move_to_element(refresh_elem).click().perform()
                     time.sleep(0.5)
                 except NoSuchElementException:
-                    load_count += 1
-                if load_count == 2:
-                    break
+                    ...
+                try:
+                    refresh_elem = self.m_spider.find_element(By.CSS_SELECTOR, '#`nc_1_refresh1`')
+                    ActionChains(self.m_spider).move_to_element(refresh_elem).click().perform()
+                    time.sleep(0.5)
+                except NoSuchElementException:
+                    ...
                 time.sleep(1)  # 等待页面刷新
 
                 # 最多重试十次
@@ -252,30 +261,29 @@ class AliExpressSpider:
             try:
                 info_name_elems = self.m_spider.find_elements(By.CSS_SELECTOR, "#container div[class='label']")
                 info_content_elems = self.m_spider.find_elements(By.CSS_SELECTOR, "#container div[class='content-en']")
-                list_info = [store_num, '', '', '', '']
+                infos = [store_num, '', '', '', '']
                 match_count = 0
                 for i, info_name_elem in enumerate(info_name_elems):
                     if info_name_elem.text == 'Company name：':
-                        list_info[1] = info_content_elems[i].text
+                        infos[1] = info_content_elems[i].text
                         match_count += 1
                         pass
                     elif info_name_elem.text == 'Address：':
-                        list_info[2] = info_content_elems[i].text
+                        infos[2] = info_content_elems[i].text
                         match_count += 1
                         pass
                     elif info_name_elem.text == 'Business Scope：':
-                        list_info[3] = info_content_elems[i].text
+                        infos[3] = info_content_elems[i].text
                         match_count += 1
                         pass
                     elif info_name_elem.text == 'Established：':
-                        list_info[4] = info_content_elems[i].text
+                        infos[4] = info_content_elems[i].text
                         match_count += 1
                         pass
                     else:
                         pass
                 if match_count >= 2:
-                    # self.m_logger.info(str(list_info))
-                    write_csv(list_info)
+                    write_csv(infos)
                     return 0
                 else:
                     return -4
@@ -290,8 +298,8 @@ class AliExpressSpider:
         if self.get_all_cates():
             self.m_logger.info("Successfully get all categories and their links")
             # 遍历所有分类
-            for cate_info in self.cate_infos:
-                self.num_current_page = 1
+            for cate_info in self.m_cate_infos:
+                self.m_num_current_page = 1
                 self.m_logger.info(f'Start to get store link of {cate_info["name"]}')
 
                 # 打开分类的第一页
@@ -306,10 +314,10 @@ class AliExpressSpider:
                     # 循环获取所有页的商店信息
                     while True:
                         # 获取当前页信息
-                        self.m_logger.info(f'Start to get store link of Page {self.num_current_page}')
-                        self.links_current_page = self.get_store_url_of_page()
+                        self.m_logger.info(f'Start to get store link of Page {self.m_num_current_page}')
+                        self.m_links_current_page = self.get_store_url_of_page()
 
-                        tmp_links_current_page = self.links_current_page[:]
+                        tmp_links_current_page = self.m_links_current_page[:]
                         for store_link in tmp_links_current_page:
                             start_index_store_num = store_link.rindex('/')
                             store_num = store_link[start_index_store_num + 1:]
@@ -321,7 +329,7 @@ class AliExpressSpider:
                                 if ret == 0:
                                     self.m_logger.info(f'Successfully get store info of {store_num}')
                                     self.m_bf.add(store_num)
-                                    self.links_current_page.remove(store_link)
+                                    self.m_links_current_page.remove(store_link)
                                 elif ret == -1:
                                     self.m_logger.info(f'Failed to get info of {store_num} due to Page loading failure')
                                 elif ret == -2:
@@ -350,12 +358,12 @@ class AliExpressSpider:
                             next_page_elem = self.m_spider.find_element(By.CSS_SELECTOR, "li[class$='next-next']")
                             ActionChains(self.m_spider).click(next_page_elem).perform()
 
-                            self.num_current_page += 1
+                            self.m_num_current_page += 1
                         except NoSuchElementException:
                             break
                         # 页面存在，但页面内无数据
-                        try :
-                            self.m_spider.find_element(By.CSS_SELECTOR,"div[class^='list--gallery']")
+                        try:
+                            self.m_spider.find_element(By.CSS_SELECTOR, "div[class^='list--gallery']")
                         except NoSuchElementException:
                             break
                 else:
@@ -384,7 +392,7 @@ if __name__ == "__main__":
             proc = subprocess.Popen(cmd_edge)
         else:
             proc = subprocess.Popen(cmd_chrome)
-        testAliExpressSpider = AliExpressSpider(browser_type)
+        testAliExpressSpider = AliExpressSpider(browser_type, False)
         testAliExpressSpider.start_to_spy()
         testAliExpressSpider.destroy()
 
