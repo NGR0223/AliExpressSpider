@@ -6,7 +6,7 @@ from random import randint
 import subprocess
 from selenium import webdriver
 from selenium.common import NoSuchElementException, ElementNotInteractableException, InvalidArgumentException, \
-    WebDriverException
+    WebDriverException, NoSuchFrameException
 from selenium.webdriver.common.by import By
 from selenium.webdriver import ActionChains, EdgeOptions
 from selenium.webdriver.chrome.webdriver import Options
@@ -131,13 +131,13 @@ class AliExpressSpider:
         for i in range(0, 20):
             self.m_spider.execute_script("window.scrollTo(0," + str(px_each_time) + ")")
             px_each_time += 200
-            time.sleep(0.5)
+            time.sleep(0.2)
 
     def slide_verification_by_offset(self, offset):
         slide_ele = self.m_spider.find_element(By.ID, 'nc_1_n1z')
         tracks = get_track(offset)
         ActionChains(self.m_spider).click_and_hold(slide_ele).perform()
-        time.sleep(0.5)
+        time.sleep(0.2)
         for track in tracks:
             ActionChains(self.m_spider).move_by_offset(xoffset=track, yoffset=0).perform()
             time.sleep(0.001)
@@ -147,14 +147,14 @@ class AliExpressSpider:
         self.m_spider.find_element(By.ID, 'fm-login-id').send_keys(ALIEXPRESS_UNAME)
         self.m_spider.find_element(By.ID, 'fm-login-password').send_keys(ALIEXPRESS_PWD)
         self.m_spider.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
+        time.sleep(0.2)
 
         # 滑动验证
-        WebDriverWait(self.m_spider, 10).until(
-            ec.frame_to_be_available_and_switch_to_it((By.ID, 'baxia-dialog-content')))
         try:
-            WebDriverWait(self.m_spider, 10).until(ec.visibility_of_element_located((By.ID, 'nc_1_n1z')))
+            iframe_elem = self.m_spider.find_element(By.ID, 'baxia-dialog-content')
+            self.m_spider.switch_to.frame(iframe_elem)
             self.slide_verification_by_offset(316)
-        except NoSuchElementException:
+        except (NoSuchElementException, NoSuchFrameException):
             pass
 
     def get_all_cates(self):
@@ -176,7 +176,7 @@ class AliExpressSpider:
                                                        "right: 5px; top: 5px; cursor: pointer;']")
                 ActionChains(self.m_spider).move_to_element(close_ele).click().perform()
             except NoSuchElementException:
-                ...
+                pass
         else:
             return False
         if os.path.isfile(CATES_CSV_FILE):
@@ -225,7 +225,6 @@ class AliExpressSpider:
         if self.try_to_get_page(license_page_url):
             retry = 0
             while True:
-                ban_flag = False
                 load_count = 0
                 # 滑动验证
                 try:
@@ -248,10 +247,7 @@ class AliExpressSpider:
                 retry += 1
                 if retry > 10:
                     self.m_logger.info(f'Failed to get info of {store_num} after ten retries')
-                    ban_flag = True
-                    break
-            if ban_flag:
-                return -2
+                    return -2
             # 获取所需要的信息
             try:
                 info_name_elems = self.m_spider.find_elements(By.CSS_SELECTOR, "#container div[class='label']")
@@ -276,7 +272,7 @@ class AliExpressSpider:
                         match_count += 1
                         pass
                     else:
-                        ...
+                        pass
                 if match_count >= 2:
                     # self.m_logger.info(str(list_info))
                     write_csv(list_info)
@@ -289,7 +285,6 @@ class AliExpressSpider:
             return -1
 
     def start_to_spy(self):
-        flag_restart = False
         # 获取所有分类
         self.m_logger.info("Start to get all cates")
         if self.get_all_cates():
@@ -301,6 +296,13 @@ class AliExpressSpider:
 
                 # 打开分类的第一页
                 if self.try_to_get_page(cate_info["link"]):
+                    # 此时仍然可能需要登录
+                    try:
+                        self.m_spider.find_element(By.CSS_SELECTOR, "input[id^='fm-login']")
+                        self.login()
+                    except NoSuchElementException:
+                        pass
+
                     # 循环获取所有页的商店信息
                     while True:
                         # 获取当前页信息
@@ -324,8 +326,7 @@ class AliExpressSpider:
                                     self.m_logger.info(f'Failed to get info of {store_num} due to Page loading failure')
                                 elif ret == -2:
                                     self.m_logger.info(f'Failed to get info of {store_num} due to Banned')
-                                    flag_restart = True
-                                    break
+                                    return
                                 elif ret == -3:
                                     self.m_logger.info(
                                         f'Failed to get info of {store_num} due to Web elements loading failure')
@@ -334,7 +335,7 @@ class AliExpressSpider:
                                         f'Failed to get info of {store_num} due to Web elements loaded not enough')
                                 else:
                                     self.m_logger.info(f'Failed to get info of {store_num} due to Unknown error')
-                            time.sleep(randint(1, 3))
+                                time.sleep(randint(1, 3))
 
                             # 偶尔提示“通过验证以确保正常访问”
                             try:
@@ -343,9 +344,6 @@ class AliExpressSpider:
                             except (NoSuchElementException, ElementNotInteractableException):
                                 pass
                         self.m_bf.tofile(open(GOTTEN_STORE_BLOOM, 'wb'))
-
-                        if flag_restart:
-                            break
 
                         # 向后翻页
                         try:
@@ -356,7 +354,7 @@ class AliExpressSpider:
                         except NoSuchElementException:
                             break
                 else:
-                    ...
+                    pass
 
         else:
             self.m_logger.info("Exit")
