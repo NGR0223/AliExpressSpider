@@ -241,7 +241,7 @@ class AliExpressSpider:
                     load_count += 1
                 if load_count == 2:
                     break
-                time.sleep(3)  # 等待页面刷新
+                time.sleep(1)  # 等待页面刷新
 
                 # 最多重试十次
                 retry += 1
@@ -347,10 +347,15 @@ class AliExpressSpider:
 
                         # 向后翻页
                         try:
-                            next_page_ele = self.m_spider.find_element(By.CSS_SELECTOR, "link[rel='next']")
-                            self.try_to_get_page(next_page_ele.get_attribute('href'))
+                            next_page_elem = self.m_spider.find_element(By.CSS_SELECTOR, "li[class$='next-next']")
+                            ActionChains(self.m_spider).click(next_page_elem).perform()
 
                             self.num_current_page += 1
+                        except NoSuchElementException:
+                            break
+                        # 页面存在，但页面内无数据
+                        try :
+                            self.m_spider.find_element(By.CSS_SELECTOR,"div[class^='list--gallery']")
                         except NoSuchElementException:
                             break
                 else:
