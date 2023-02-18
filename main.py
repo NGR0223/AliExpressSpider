@@ -2,8 +2,8 @@ import os
 import csv
 import time
 import logging
-from random import randint
 import subprocess
+from random import randint
 from selenium import webdriver
 from selenium.common import NoSuchElementException, ElementNotInteractableException, InvalidArgumentException, \
     WebDriverException, NoSuchFrameException
@@ -83,11 +83,12 @@ def get_track(distance):
 
 
 class AliExpressSpider:
-    def __init__(self, browser, reverse_order):
+    def __init__(self, browser, reverse_order, start_index_cate):
         self.m_cate_infos = []
         self.m_links_current_page = []
         self.m_num_current_page = 1
         self.m_reverse_order = reverse_order
+        self.m_start_index_cate = start_index_cate
 
         self.m_logger = logging.getLogger('AliExpressSpider')
         self.m_logger.info("Init")
@@ -297,8 +298,12 @@ class AliExpressSpider:
         self.m_logger.info("Start to get all cates")
         if self.get_all_cates():
             self.m_logger.info("Successfully get all categories and their links")
+            # 调整类别链接列表
+            tmp_cate_infos = self.m_cate_infos[self.m_start_index_cate:] + self.m_cate_infos[:self.m_start_index_cate]
+            if self.m_reverse_order:
+                tmp_cate_infos.reverse()
             # 遍历所有分类
-            for cate_info in self.m_cate_infos:
+            for cate_info in tmp_cate_infos:
                 self.m_num_current_page = 1
                 self.m_logger.info(f'Start to get store link of {cate_info["name"]}')
 
@@ -392,7 +397,7 @@ if __name__ == "__main__":
             proc = subprocess.Popen(cmd_edge)
         else:
             proc = subprocess.Popen(cmd_chrome)
-        testAliExpressSpider = AliExpressSpider(browser_type, False)
+        testAliExpressSpider = AliExpressSpider(browser_type, False, 0)
         testAliExpressSpider.start_to_spy()
         testAliExpressSpider.destroy()
 
