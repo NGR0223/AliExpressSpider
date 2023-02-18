@@ -240,17 +240,17 @@ class AliExpressSpider:
 
                 # 点击错误提示刷新页面
                 try:
-                    refresh_elem = self.m_spider.find_element(By.CSS_SELECTOR, '#nc_1_refresh1')
+                    refresh_elem = self.m_spider.find_element(By.CSS_SELECTOR, "[id$='nc_1_refresh1']")
                     ActionChains(self.m_spider).move_to_element(refresh_elem).click().perform()
                     time.sleep(0.5)
                 except NoSuchElementException:
                     ...
-                try:
-                    refresh_elem = self.m_spider.find_element(By.CSS_SELECTOR, '#`nc_1_refresh1`')
-                    ActionChains(self.m_spider).move_to_element(refresh_elem).click().perform()
-                    time.sleep(0.5)
-                except NoSuchElementException:
-                    ...
+                # try:
+                #     refresh_elem = self.m_spider.find_element(By.CSS_SELECTOR, '#`nc_1_refresh1`')
+                #     ActionChains(self.m_spider).move_to_element(refresh_elem).click().perform()
+                #     time.sleep(0.5)
+                # except NoSuchElementException:
+                #     ...
                 time.sleep(1)  # 等待页面刷新
 
                 # 最多重试十次
@@ -359,6 +359,8 @@ class AliExpressSpider:
                         self.m_bf.tofile(open(GOTTEN_STORE_BLOOM, 'wb'))
 
                         # 向后翻页
+                        if self.try_to_get_page(cate_info["link"]):
+                            self.scroll_to_end_of_page()
                         try:
                             next_page_elem = self.m_spider.find_element(By.CSS_SELECTOR, "li[class$='next-next']")
                             ActionChains(self.m_spider).click(next_page_elem).perform()
