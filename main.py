@@ -14,6 +14,7 @@ from pybloom_live import ScalableBloomFilter
 
 CATES_CSV_FILE = 'cates.csv'  # 分类信息文件
 INFO_CSV_FILE = 'info.csv'  # 商家信息文件
+CONFIG_JSON_FILE = 'config.json'  # 爬虫配置记录文件
 GOTTEN_STORE_BLOOM = 'GottenStore.blm'
 ALIEXPRESS_URL = 'https://aliexpress.com'
 ALIEXPRESS_UNAME = 'ngr0223@gmail.com'
@@ -83,24 +84,23 @@ def get_track(distance):
 
 
 class AliExpressSpider:
-    def __init__(self, browser, reverse_order, start_index_cate):
+    def __init__(self, browser_type, start_index_cate):
         self.m_cate_infos = []
         self.m_links_current_page = []
-        self.m_num_current_page = 1
-        self.m_reverse_order = reverse_order
+        self.m_bf = None
+        self.m_spider = None
+        self.m_browser_type = browser_type
         self.m_start_index_cate = start_index_cate
+        self.m_num_current_page = 0
+
+        self.bloom_filter_init()
+        self.browser_init()
 
         self.m_logger = logging.getLogger('AliExpressSpider')
         self.m_logger.info("Init")
 
-        self.m_bf = None
-        self.bloom_filter_init()
-
-        self.m_spider = None
-        self.browser_init(browser)
-
-    def browser_init(self, browser):
-        if browser:
+    def browser_init(self):
+        if self.m_browser_type:
             option = EdgeOptions()
             # 连接到手动启动的浏览器
             option.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
@@ -240,17 +240,11 @@ class AliExpressSpider:
 
                 # 点击错误提示刷新页面
                 try:
-                    refresh_elem = self.m_spider.find_element(By.CSS_SELECTOR, "[id$='nc_1_refresh1']")
+                    refresh_elem = self.m_spider.find_element(By.CSS_SELECTOR, "[id*='nc_1_refresh1']")
                     ActionChains(self.m_spider).move_to_element(refresh_elem).click().perform()
                     time.sleep(0.5)
                 except NoSuchElementException:
                     ...
-                # try:
-                #     refresh_elem = self.m_spider.find_element(By.CSS_SELECTOR, '#`nc_1_refresh1`')
-                #     ActionChains(self.m_spider).move_to_element(refresh_elem).click().perform()
-                #     time.sleep(0.5)
-                # except NoSuchElementException:
-                #     ...
                 time.sleep(1)  # 等待页面刷新
 
                 # 最多重试十次
@@ -294,14 +288,13 @@ class AliExpressSpider:
             return -1
 
     def start_to_spy(self):
+        link_current_page = ''
         # 获取所有分类
         self.m_logger.info("Start to get all cates")
         if self.get_all_cates():
             self.m_logger.info("Successfully get all categories and their links")
             # 调整类别链接列表
             tmp_cate_infos = self.m_cate_infos[self.m_start_index_cate:] + self.m_cate_infos[:self.m_start_index_cate]
-            if self.m_reverse_order:
-                tmp_cate_infos.reverse()
             # 遍历所有分类
             for cate_info in tmp_cate_infos:
                 self.m_num_current_page = 1
@@ -316,6 +309,8 @@ class AliExpressSpider:
                     except NoSuchElementException:
                         pass
 
+                    # 获取当前页面链接
+                    link_current_page = self.m_spider.current_url
                     # 循环获取所有页的商店信息
                     while True:
                         # 获取当前页信息
@@ -339,7 +334,7 @@ class AliExpressSpider:
                                     self.m_logger.info(f'Failed to get info of {store_num} due to Page loading failure')
                                 elif ret == -2:
                                     self.m_logger.info(f'Failed to get info of {store_num} due to Banned')
-                                    return
+                                    return self.m_start_index_cate
                                 elif ret == -3:
                                     self.m_logger.info(
                                         f'Failed to get info of {store_num} due to Web elements loading failure')
@@ -359,7 +354,7 @@ class AliExpressSpider:
                         self.m_bf.tofile(open(GOTTEN_STORE_BLOOM, 'wb'))
 
                         # 向后翻页
-                        if self.try_to_get_page(cate_info["link"]):
+                        if self.try_to_get_page(link_current_page):
                             self.scroll_to_end_of_page()
                         try:
                             next_page_elem = self.m_spider.find_element(By.CSS_SELECTOR, "li[class$='next-next']")
@@ -373,9 +368,10 @@ class AliExpressSpider:
                             self.m_spider.find_element(By.CSS_SELECTOR, "div[class^='list--gallery']")
                         except NoSuchElementException:
                             break
+                    self.m_start_index_cate += 1
                 else:
                     pass
-
+                self.m_start_index_cate += 1
         else:
             self.m_logger.info("Exit")
 
@@ -393,15 +389,16 @@ if __name__ == "__main__":
                  '--remote-debugging-port=9222 ' \
                  '--disable-notifications ' \
                  '--user-data-dir="D:\\PycharmProjects\\AliExpressSpider\\ChromeProfile"'
-    browser_type = True
+    browserType = False
+    startIndexCate = 11
     while True:
-        if browser_type:
+        if browserType:
             proc = subprocess.Popen(cmd_edge)
         else:
             proc = subprocess.Popen(cmd_chrome)
-        testAliExpressSpider = AliExpressSpider(browser_type, False, 0)
-        testAliExpressSpider.start_to_spy()
+        testAliExpressSpider = AliExpressSpider(browserType, startIndexCate)
+        startIndexCate = testAliExpressSpider.start_to_spy()
         testAliExpressSpider.destroy()
 
-        browser_type = not browser_type
+        browserType = not browserType
         proc.kill()
