@@ -143,11 +143,12 @@ class AliExpressSpider:
             time.sleep(0.001)
 
     def login(self):
+        self.m_logger.info(f'Login')
         # 登录账号
         self.m_spider.find_element(By.ID, 'fm-login-id').send_keys(ALIEXPRESS_UNAME)
         self.m_spider.find_element(By.ID, 'fm-login-password').send_keys(ALIEXPRESS_PWD)
         self.m_spider.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
-        time.sleep(0.2)
+        time.sleep(1)
 
         # 滑动验证
         try:
@@ -390,7 +391,7 @@ if __name__ == "__main__":
                  f'--disable-notifications ' \
                  f'--user-data-dir="{os.getcwd()}\\ChromeProfile"'
     browserType = False
-    startIndexCate = 11
+    startIndexCate = 12
     while True:
         if browserType:
             proc = subprocess.Popen(cmd_edge)
