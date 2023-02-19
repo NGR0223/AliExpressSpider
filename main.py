@@ -309,12 +309,12 @@ class AliExpressSpider:
                     except NoSuchElementException:
                         pass
 
-                    # 获取当前页面链接
-                    link_current_page = self.m_spider.current_url
                     # 循环获取所有页的商店信息
                     while True:
                         # 获取当前页信息
                         self.m_logger.info(f'Start to get store link of Page {self.m_num_current_page}')
+                        # 获取当前页面链接
+                        link_current_page = self.m_spider.current_url
                         self.m_links_current_page = self.get_store_url_of_page()
 
                         tmp_links_current_page = self.m_links_current_page[:]
@@ -380,15 +380,15 @@ class AliExpressSpider:
 
 
 if __name__ == "__main__":
-    cmd_edge = '"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe" ' \
-               '--remote-debugging-port=9222 ' \
-               '--disable-notification ' \
-               '--user-data-dir="D:\\PycharmProjects\\AliExpressSpider\\EdgeProfile"'
+    cmd_edge = f'"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe" ' \
+               f'--remote-debugging-port=9222 ' \
+               f'--disable-notification ' \
+               f'--user-data-dir="{os.getcwd()}\\EdgeProfile"'
 
-    cmd_chrome = '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" ' \
-                 '--remote-debugging-port=9222 ' \
-                 '--disable-notifications ' \
-                 '--user-data-dir="D:\\PycharmProjects\\AliExpressSpider\\ChromeProfile"'
+    cmd_chrome = f'"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" ' \
+                 f'--remote-debugging-port=9222 ' \
+                 f'--disable-notifications ' \
+                 f'--user-data-dir="{os.getcwd()}\\ChromeProfile"'
     browserType = False
     startIndexCate = 11
     while True:
