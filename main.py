@@ -90,7 +90,10 @@ class AliExpressSpider:
         self.m_bf = None
         self.m_spider = None
         self.m_browser_type = browser_type
-        self.m_start_index_cate = start_index_cate
+        if start_index_cate is None:
+            self.m_start_index_cate = 0
+        else:
+            self.m_start_index_cate = start_index_cate
         self.m_num_current_page = 0
 
         self.bloom_filter_init()
@@ -145,7 +148,9 @@ class AliExpressSpider:
     def login(self):
         self.m_logger.info(f'Login')
         # 登录账号
+        self.m_spider.find_element(By.ID, 'fm-login-id').clear()
         self.m_spider.find_element(By.ID, 'fm-login-id').send_keys(ALIEXPRESS_UNAME)
+        self.m_spider.find_element(By.ID, 'fm-login-password').clear()
         self.m_spider.find_element(By.ID, 'fm-login-password').send_keys(ALIEXPRESS_PWD)
         self.m_spider.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
         time.sleep(1)
@@ -289,7 +294,6 @@ class AliExpressSpider:
             return -1
 
     def start_to_spy(self):
-        link_current_page = ''
         # 获取所有分类
         self.m_logger.info("Start to get all cates")
         if self.get_all_cates():
@@ -326,6 +330,8 @@ class AliExpressSpider:
                             if store_num in self.m_bf:
                                 self.m_logger.info(f'Already get store info of {store_num}')
                             else:
+                                self.m_spider.execute_script('window.open();')
+                                self.m_spider.switch_to.window(self.m_spider.window_handles[1])
                                 ret = self.get_store_info(store_num)
                                 if ret == 0:
                                     self.m_logger.info(f'Successfully get store info of {store_num}')
@@ -344,7 +350,8 @@ class AliExpressSpider:
                                         f'Failed to get info of {store_num} due to Web elements loaded not enough')
                                 else:
                                     self.m_logger.info(f'Failed to get info of {store_num} due to Unknown error')
-                                time.sleep(randint(1, 3))
+                                self.m_spider.close()
+                                self.m_spider.switch_to.window(self.m_spider.window_handles[0])
 
                             # 偶尔提示“通过验证以确保正常访问”
                             try:
@@ -363,7 +370,13 @@ class AliExpressSpider:
 
                             self.m_num_current_page += 1
                         except NoSuchElementException:
-                            break
+                            pass
+                        # Access Now页面
+                        try:
+                            access_now_elem = self.m_spider.find_element(By.CSS_SELECTOR, "button[type='submit']")
+                            ActionChains(self.m_spider).click(access_now_elem).perform()
+                        except NoSuchElementException:
+                            pass
                         # 页面存在，但页面内无数据
                         try:
                             self.m_spider.find_element(By.CSS_SELECTOR, "div[class^='list--gallery']")
@@ -390,9 +403,10 @@ if __name__ == "__main__":
                  f'--remote-debugging-port=9222 ' \
                  f'--disable-notifications ' \
                  f'--user-data-dir="{os.getcwd()}\\ChromeProfile"'
-    browserType = False
+    browserType = True
     startIndexCate = 12
     while True:
+        browserType = False
         if browserType:
             proc = subprocess.Popen(cmd_edge)
         else:
