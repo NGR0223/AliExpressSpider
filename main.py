@@ -17,7 +17,7 @@ INFO_CSV_FILE = 'info.csv'  # 商家信息文件
 CONFIG_JSON_FILE = 'config.json'  # 爬虫配置记录文件
 GOTTEN_STORE_BLOOM = 'GottenStore.blm'
 ALIEXPRESS_URL = 'https://aliexpress.com'
-ALIEXPRESS_UNAME = 'ngr0223@gmail.com'
+ALIEXPRESS_UNAME = 'xxx@gmail.com'
 ALIEXPRESS_PWD = 'mWs!Cr26i3.PirB'
 PREFIX_LICENSE_LINK = 'https://sellerjoin.aliexpress.com/credential/showcredential.htm?storeNum='
 
